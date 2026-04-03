@@ -159,14 +159,18 @@ def crop_likely_document_area(image):
 
     x, y, cw, ch = best_rect
 
-    # هامش بسيط حول المستند
-    margin_x = int(cw * 0.03)
-    margin_y = int(ch * 0.03)
+    # هامش أصغر جداً حول المستند لاستخراج محتوى المستند فقط
+    margin_x = max(0, int(cw * 0.01))  # 1% بدل 3%
+    margin_y = max(0, int(ch * 0.01))  # 1% بدل 3%
 
-    x1 = max(0, x - margin_x)
-    y1 = max(0, y - margin_y)
-    x2 = min(w, x + cw + margin_x)
-    y2 = min(h, y + ch + margin_y)
+    x1 = max(0, x + margin_x)
+    y1 = max(0, y + margin_y)
+    x2 = min(w, x + cw - margin_x)
+    y2 = min(h, y + ch - margin_y)
+
+    # التأكد من أن الإحداثيات صحيحة
+    if x2 <= x1 or y2 <= y1:
+        return image
 
     cropped = image[y1:y2, x1:x2]
     return cropped
