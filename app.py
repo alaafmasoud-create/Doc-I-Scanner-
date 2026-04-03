@@ -1,6 +1,7 @@
 import streamlit as st
 import cv2
 import numpy as np
+from streamlit_image_coordinates import streamlit_image_coordinates
 
 
 # -----------------------------
@@ -11,12 +12,12 @@ def order_points(pts):
     rect = np.zeros((4, 2), dtype=np.float32)
 
     s = pts.sum(axis=1)
-    rect[0] = pts[np.argmin(s)]
-    rect[2] = pts[np.argmax(s)]
+    rect[0] = pts[np.argmin(s)]   # top-left
+    rect[2] = pts[np.argmax(s)]   # bottom-right
 
     diff = np.diff(pts, axis=1).reshape(-1)
-    rect[1] = pts[np.argmin(diff)]
-    rect[3] = pts[np.argmax(diff)]
+    rect[1] = pts[np.argmin(diff)]  # top-right
+    rect[3] = pts[np.argmax(diff)]  # bottom-left
 
     return rect
 
@@ -42,7 +43,6 @@ def four_point_transform(image, pts):
 
     M = cv2.getPerspectiveTransform(rect, dst)
     warped = cv2.warpPerspective(image, M, (max_width, max_height))
-
     return warped
 
 
@@ -129,7 +129,6 @@ def build_candidate_masks(image):
 
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     gray = cv2.GaussianBlur(gray, (5, 5), 0)
-
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
     gray_eq = clahe.apply(gray)
 
@@ -152,9 +151,8 @@ def build_candidate_masks(image):
 
         k = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 9))
         grabcut = cv2.morphologyEx(grabcut, cv2.MORPH_CLOSE, k, iterations=2)
-
         masks.append(("grabcut", grabcut))
-    except:
+    except Exception:
         pass
 
     # Bright mask
@@ -164,72 +162,260 @@ def build_candidate_masks(image):
     k = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
     bright = cv2.erode(bright, k, iterations=2)
 
-    comp = largest_non_border_component(bright)
+    comp = largest_non_border_component(bright, min_area_ratio=0.05)
     if comp is not None:
         comp = cv2.dilate(comp, k, iterations=2)
+        comp = cv2.morphologyEx(comp, cv2.MORPH_CLOSE, k, iterations=2)
         masks.append(("bright", comp))
 
     # Edges
     edges = cv2.Canny(gray, 40, 140)
     k2 = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
     edges = cv2.dilate(edges, k2, iterations=2)
+    edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, k2, iterations=2)
     masks.append(("edges", edges))
 
     return masks
 
 
 # -----------------------------
-# Detection
+# Candidate scoring
 # -----------------------------
-def detect_document(original):
+def score_candidate(quad, img_shape, contour_area):
+    h, w = img_shape[:2]
+    rect = order_points(quad)
+    tl, tr, br, bl = rect
 
-    image = original.copy()
+    width = max(np.linalg.norm(tr - tl), np.linalg.norm(br - bl))
+    height = max(np.linalg.norm(bl - tl), np.linalg.norm(br - tr))
+
+    if width < 100 or height < 100:
+        return -1e9
+
+    box_area = cv2.contourArea(rect.reshape(-1, 1, 2))
+    if box_area <= 1:
+        return -1e9
+
+    area_ratio = box_area / (h * w)
+    if area_ratio < 0.20 or area_ratio > 0.98:
+        return -1e9
+
+    aspect = max(width, height) / max(1.0, min(width, height))
+    a4_ratio = 1.414
+    aspect_score = max(0.0, 1.0 - abs(aspect - a4_ratio) / 0.8)
+
+    center = rect.mean(axis=0)
+    img_center = np.array([w / 2.0, h / 2.0], dtype=np.float32)
+    center_dist = np.linalg.norm(center - img_center) / np.linalg.norm(img_center)
+    center_score = max(0.0, 1.0 - center_dist)
+
+    fill_ratio = float(np.clip(contour_area / box_area, 0.0, 1.2))
+
+    margin = min(
+        rect[:, 0].min(),
+        rect[:, 1].min(),
+        (w - 1) - rect[:, 0].max(),
+        (h - 1) - rect[:, 1].max(),
+    )
+    margin_score = float(np.clip((margin + 20) / 120.0, 0.0, 1.0))
+
+    score = (
+        area_ratio * 95.0
+        + aspect_score * 22.0
+        + center_score * 8.0
+        + margin_score * 4.0
+        + fill_ratio * 40.0
+    )
+
+    return score
+
+
+# -----------------------------
+# Auto detection
+# -----------------------------
+def detect_document_auto(original):
+    if original.shape[0] > 1400:
+        resize_ratio = original.shape[0] / 1400.0
+        image = cv2.resize(original, (int(original.shape[1] / resize_ratio), 1400))
+    else:
+        resize_ratio = 1.0
+        image = original.copy()
+
     masks = build_candidate_masks(image)
 
     best_quad = None
-    best_area = 0
+    best_score = -1e9
+    best_source = None
+    best_fill_ratio = 1.0
 
-    for _, mask in masks:
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    img_area = image.shape[0] * image.shape[1]
+
+    for source_name, candidate_mask in masks:
+        contours = cv2.findContours(
+            candidate_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
+        contours = contours[0] if len(contours) == 2 else contours[1]
+        contours = sorted(contours, key=cv2.contourArea, reverse=True)[:12]
 
         for c in contours:
-            area = cv2.contourArea(c)
-            if area < best_area:
+            contour_area = cv2.contourArea(c)
+            if contour_area < 0.05 * img_area:
                 continue
 
             quad = contour_to_quad(c)
-            best_quad = quad
-            best_area = area
+            score = score_candidate(quad, image.shape, contour_area)
+
+            if score > best_score:
+                box_area = cv2.contourArea(order_points(quad).reshape(-1, 1, 2))
+                fill_ratio = float(np.clip(contour_area / max(box_area, 1.0), 0.0, 1.2))
+
+                best_score = score
+                best_quad = quad
+                best_source = source_name
+                best_fill_ratio = min(fill_ratio, 1.0)
 
     if best_quad is None:
-        raise ValueError("لم يتم اكتشاف المستند")
+        raise ValueError("لم أتمكن من اكتشاف الورقة بشكل صحيح.")
 
-    best_quad = expand_quad(best_quad, 1.08, original.shape)
+    best_quad = best_quad * resize_ratio
+
+    expansion = 1.0 + 0.55 * (1.0 - best_fill_ratio)
+    if best_source == "edges":
+        expansion += 0.02
+
+    expansion = float(np.clip(expansion, 1.00, 1.18))
+    best_quad = expand_quad(best_quad, expansion, original.shape)
 
     warped = four_point_transform(original, best_quad)
-
+    warped = trim_black_frame(warped)
     return warped
 
 
-def process_document(file_bytes):
+# -----------------------------
+# Manual mode helpers
+# -----------------------------
+def draw_points(image, points, radius=10):
+    canvas = image.copy()
+    rgb = cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB)
+
+    for idx, (x, y) in enumerate(points):
+        cv2.circle(rgb, (int(x), int(y)), radius, (255, 0, 0), -1)
+        cv2.putText(
+            rgb,
+            str(idx + 1),
+            (int(x) + 12, int(y) - 12),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.8,
+            (255, 0, 0),
+            2,
+            cv2.LINE_AA
+        )
+    return rgb
+
+
+def detect_document_manual(original, points):
+    pts = np.array(points, dtype=np.float32)
+    warped = four_point_transform(original, pts)
+    warped = trim_black_frame(warped)
+    return warped
+
+
+# -----------------------------
+# Post-processing
+# -----------------------------
+def trim_black_frame(image):
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    _, mask = cv2.threshold(gray, 6, 255, cv2.THRESH_BINARY)
+    coords = cv2.findNonZero(mask)
+
+    if coords is None:
+        return image
+
+    x, y, w, h = cv2.boundingRect(coords)
+    return image[y:y + h, x:x + w]
+
+
+def decode_uploaded_image(file_bytes):
     file_array = np.asarray(bytearray(file_bytes), dtype=np.uint8)
     img = cv2.imdecode(file_array, cv2.IMREAD_COLOR)
-
-    return detect_document(img)
+    if img is None:
+        raise ValueError("تعذر قراءة الصورة المرفوعة.")
+    return img
 
 
 # -----------------------------
 # Streamlit UI
 # -----------------------------
-st.set_page_config(page_title="A4 Scanner", layout="centered")
+st.set_page_config(page_title="A4 Document Scanner", layout="centered")
 
 st.title("A4 Document Scanner")
+st.write("ارفع صورة ورقة A4. يمكنك استخدام الوضع التلقائي أو تحديد الزوايا يدويًا بالنقر 4 مرات.")
 
-uploaded_file = st.file_uploader("Upload image")
+mode = st.radio("Mode", ["Auto", "Manual"], horizontal=True)
+
+uploaded_file = st.file_uploader(
+    "Upload image",
+    type=["jpg", "jpeg", "png", "bmp", "webp"]
+)
+
+if "manual_points" not in st.session_state:
+    st.session_state.manual_points = []
+
+if "last_click" not in st.session_state:
+    st.session_state.last_click = None
 
 if uploaded_file is not None:
     file_bytes = uploaded_file.read()
+    original = decode_uploaded_image(file_bytes)
 
-    result = process_document(file_bytes)
+    if mode == "Auto":
+        try:
+            result = detect_document_auto(original)
+            st.image(
+                cv2.cvtColor(result, cv2.COLOR_BGR2RGB),
+                caption="Final Result",
+                use_container_width=True
+            )
+        except Exception as e:
+            st.error(f"Error: {e}")
 
-    st.image(cv2.cvtColor(result, cv2.COLOR_BGR2RGB))
+    else:
+        st.info("انقر بالترتيب: أعلى يسار، أعلى يمين، أسفل يمين، أسفل يسار.")
+
+        col_a, col_b = st.columns([1, 1])
+
+        with col_a:
+            if st.button("Reset points"):
+                st.session_state.manual_points = []
+                st.session_state.last_click = None
+                st.rerun()
+
+            preview_rgb = draw_points(original, st.session_state.manual_points)
+            clicked = streamlit_image_coordinates(
+                preview_rgb,
+                key="manual_click_image"
+            )
+
+            if clicked is not None:
+                current_click = (clicked["x"], clicked["y"])
+                if st.session_state.last_click != current_click:
+                    if len(st.session_state.manual_points) < 4:
+                        st.session_state.manual_points.append(current_click)
+                    st.session_state.last_click = current_click
+                    st.rerun()
+
+        with col_b:
+            st.write(f"Points selected: {len(st.session_state.manual_points)}/4")
+            for i, p in enumerate(st.session_state.manual_points, start=1):
+                st.write(f"{i}: x={p[0]}, y={p[1]}")
+
+            if len(st.session_state.manual_points) == 4:
+                try:
+                    result = detect_document_manual(original, st.session_state.manual_points)
+                    st.image(
+                        cv2.cvtColor(result, cv2.COLOR_BGR2RGB),
+                        caption="Manual Result",
+                        use_container_width=True
+                    )
+                except Exception as e:
+                    st.error(f"Error: {e}")
