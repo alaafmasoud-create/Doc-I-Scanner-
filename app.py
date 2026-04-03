@@ -185,7 +185,7 @@ def detect_document(image):
         raise ValueError("لم أتمكن من تحديد المستند كاملًا.")
 
     # نوسّع الحدود قليلًا حتى لا تُقص الترويسة أو آخر الصفحة
-    best_quad = expand_quad(best_quad, image.shape, scale=1.04)
+    best_quad = expand_quad(best_quad, image.shape, scale=1.02)
 
     # إعادة الإحداثيات لحجم الصورة الأصلي
     best_quad = best_quad * ratio
@@ -194,23 +194,46 @@ def detect_document(image):
     return warped
 
 
-def light_trim(image, threshold=8, pad=12):
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    _, mask = cv2.threshold(gray, threshold, 255, cv2.THRESH_BINARY)
-    coords = cv2.findNonZero(mask)
+def smooth_signal(arr, k=21):
+    if k < 3:
+        return arr
+    kernel = np.ones(k, dtype=np.float32) / k
+    return np.convolve(arr, kernel, mode="same")
 
-    if coords is None:
+
+def light_trim(image, threshold=210, pad=4):
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    gray = cv2.GaussianBlur(gray, (5, 5), 0)
+
+    # نستخدم percentile بدل المتوسط حتى لا تؤثر الكتابة داخل الصفحة
+    row_signal = smooth_signal(np.percentile(gray, 80, axis=1), 21)
+    col_signal = smooth_signal(np.percentile(gray, 80, axis=0), 21)
+
+    top = 0
+    while top < len(row_signal) - 1 and row_signal[top] < threshold:
+        top += 1
+
+    bottom = len(row_signal) - 1
+    while bottom > 0 and row_signal[bottom] < threshold:
+        bottom -= 1
+
+    left = 0
+    while left < len(col_signal) - 1 and col_signal[left] < threshold:
+        left += 1
+
+    right = len(col_signal) - 1
+    while right > 0 and col_signal[right] < threshold:
+        right -= 1
+
+    top = max(top - pad, 0)
+    left = max(left - pad, 0)
+    bottom = min(bottom + pad, image.shape[0] - 1)
+    right = min(right + pad, image.shape[1] - 1)
+
+    if bottom <= top or right <= left:
         return image
 
-    x, y, w, h = cv2.boundingRect(coords)
-
-    x = max(x - pad, 0)
-    y = max(y - pad, 0)
-    x2 = min(x + w + 2 * pad, image.shape[1])
-    y2 = min(y + h + 2 * pad, image.shape[0])
-
-    return image[y:y2, x:x2]
-
+    return image[top:bottom + 1, left:right + 1]
 
 def process_document(file_bytes):
     file_array = np.asarray(bytearray(file_bytes), dtype=np.uint8)
