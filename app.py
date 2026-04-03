@@ -371,9 +371,10 @@ st.write(
 
 mode = st.radio("Mode", ["Auto", "Manual"], horizontal=True)
 
-uploaded_file = st.file_uploader(
+uploaded_files = st.file_uploader(
     "Upload image",
-    type=["jpg", "jpeg", "png", "bmp", "webp"]
+    type=["jpg", "jpeg", "png", "bmp", "webp"],
+    accept_multiple_files=True
 )
 
 if "manual_points_preview" not in st.session_state:
@@ -388,40 +389,49 @@ if "last_click" not in st.session_state:
 if "last_uploaded_key" not in st.session_state:
     st.session_state.last_uploaded_key = None
 
-if uploaded_file is not None:
-    upload_key = f"{uploaded_file.name}_{uploaded_file.size}"
-
-    if st.session_state.last_uploaded_key != upload_key:
-        st.session_state.manual_points_preview = []
-        st.session_state.manual_points_original = []
-        st.session_state.last_click = None
-        st.session_state.last_uploaded_key = upload_key
-
-    file_bytes = uploaded_file.getvalue()
-    original = decode_uploaded_image(file_bytes)
-
+if uploaded_files:
     if mode == "Auto":
-        try:
-            result = detect_document_auto(original)
-            st.image(
-                cv2.cvtColor(result, cv2.COLOR_BGR2RGB),
-                caption="Final Result",
-                use_container_width=True
-            )
+        for file_index, uploaded_file in enumerate(uploaded_files):
+            st.subheader(f"Result - {uploaded_file.name}")
 
-            download_bytes = image_to_download_bytes(result)
-            if download_bytes is not None:
-                st.download_button(
-                    label="Download Final Result",
-                    data=download_bytes,
-                    file_name="final_result.png",
-                    mime="image/png"
+            file_bytes = uploaded_file.getvalue()
+            original = decode_uploaded_image(file_bytes)
+
+            try:
+                result = detect_document_auto(original)
+                st.image(
+                    cv2.cvtColor(result, cv2.COLOR_BGR2RGB),
+                    caption="Final Result",
+                    use_container_width=True
                 )
 
-        except Exception as e:
-            st.error(f"Error: {e}")
+                download_bytes = image_to_download_bytes(result)
+                if download_bytes is not None:
+                    file_base = uploaded_file.name.rsplit(".", 1)[0]
+                    st.download_button(
+                        label="Download Final Result",
+                        data=download_bytes,
+                        file_name=f"{file_base}_final_result.png",
+                        mime="image/png",
+                        key=f"download_auto_{file_index}"
+                    )
+
+            except Exception as e:
+                st.error(f"Error: {e}")
 
     else:
+        uploaded_file = uploaded_files[0]
+        upload_key = f"{uploaded_file.name}_{uploaded_file.size}"
+
+        if st.session_state.last_uploaded_key != upload_key:
+            st.session_state.manual_points_preview = []
+            st.session_state.manual_points_original = []
+            st.session_state.last_click = None
+            st.session_state.last_uploaded_key = upload_key
+
+        file_bytes = uploaded_file.getvalue()
+        original = decode_uploaded_image(file_bytes)
+
         preview_rgb, preview_scale = make_preview_for_clicks(
             original,
             max_width=1000,
@@ -486,10 +496,11 @@ if uploaded_file is not None:
 
                 download_bytes = image_to_download_bytes(result)
                 if download_bytes is not None:
+                    file_base = uploaded_file.name.rsplit(".", 1)[0]
                     st.download_button(
                         label="Download Final Result",
                         data=download_bytes,
-                        file_name="final_result.png",
+                        file_name=f"{file_base}_final_result.png",
                         mime="image/png"
                     )
 
