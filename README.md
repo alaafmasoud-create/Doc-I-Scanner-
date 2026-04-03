@@ -1,9 +1,17 @@
-# Smart Document Scanner
+# Smart Receipt Rectifier
 
-A computer vision project using OpenCV to detect and scan documents from images.
+A Streamlit app that uploads a receipt or document image from the browser, detects its shape, estimates orientation, and rectifies it using OpenCV.
+
+## Features
+- Upload image from browser
+- Edge detection
+- Contour filtering
+- Convex hull extraction
+- Rotated rectangle detection
+- Document unrotation
+- Visual display of all processing steps
 
 ## Installation
-pip install -r requirements.txt
 
-## Usage
-python scanner.py
+```bash
+pip install -r requirements.txt
