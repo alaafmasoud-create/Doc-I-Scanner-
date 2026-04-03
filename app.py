@@ -1,138 +1,135 @@
 import streamlit as st
 import cv2
 import numpy as np
-import pytesseract
-from scanner import scan_document_from_array
 
-st.set_page_config(page_title="Smart Document Scanner + OCR", layout="wide")
 
-st.title("📄 Smart Document Scanner + OCR")
-st.write("Upload a document photo, straighten it, enhance it, and extract text.")
+def process_receipt(file_bytes):
+    # Convert uploaded file to OpenCV image
+    file_array = np.asarray(bytearray(file_bytes), dtype=np.uint8)
+    img = cv2.imdecode(file_array, cv2.IMREAD_COLOR)
 
-uploaded_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
-ocr_language = st.text_input("OCR language(s)", value="eng", help="Examples: eng , spa , ara , eng+spa")
+    if img is None:
+        raise ValueError("Could not decode uploaded image.")
+
+    hh, ww = img.shape[:2]
+
+    # Edge detection
+    canny = cv2.Canny(img, 50, 200)
+
+    # Find contours
+    contours = cv2.findContours(canny, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours = contours[0] if len(contours) == 2 else contours[1]
+
+    # Filter small contours
+    cimg = np.zeros_like(canny)
+    for cntr in contours:
+        area = cv2.contourArea(cntr)
+        if area > 20:
+            cv2.drawContours(cimg, [cntr], 0, 255, 1)
+
+    # Find points for hull
+    points = np.column_stack(np.where(cimg.transpose() > 0))
+    if len(points) == 0:
+        raise ValueError("No valid contour points found. Try another image.")
+
+    hull = cv2.convexHull(points)
+
+    # Hull image
+    himg = img.copy()
+    cv2.polylines(himg, [hull], True, (0, 0, 255), 1)
+
+    # Mask
+    mask = np.zeros_like(cimg, dtype=np.uint8)
+    cv2.fillPoly(mask, [hull], 255)
+
+    # Apply mask
+    mimg = cv2.bitwise_and(img, img, mask=mask)
+
+    # Rotated rectangle
+    rotrect = cv2.minAreaRect(hull)
+    (center), (width, height), angle = rotrect
+    box = cv2.boxPoints(rotrect)
+    boxpts = np.intp(box)
+
+    # Rectangle image
+    rimg = img.copy()
+    cv2.drawContours(rimg, [boxpts], 0, (0, 0, 255), 1)
+
+    # Angle correction
+    if angle < -45:
+        angle = -(90 + angle)
+    else:
+        if width > height:
+            angle = -(90 + angle)
+        else:
+            angle = -angle
+
+    neg_angle = -angle
+
+    # Rotate
+    M = cv2.getRotationMatrix2D(center, neg_angle, scale=1.0)
+    result = cv2.warpAffine(
+        mimg,
+        M,
+        (ww, hh),
+        flags=cv2.INTER_CUBIC,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=(0, 0, 0),
+    )
+
+    return {
+        "original": img,
+        "edges": canny,
+        "filtered_edges": cimg,
+        "hull": himg,
+        "mask": mask,
+        "rotated_rect": rimg,
+        "result": result,
+        "angle": neg_angle,
+    }
+
+
+st.set_page_config(page_title="Smart Receipt Rectifier", layout="wide")
+
+st.title("Smart Receipt Rectifier")
+st.write("Upload an image of a receipt or document to detect and straighten it.")
+
+uploaded_file = st.file_uploader(
+    "Upload image",
+    type=["jpg", "jpeg", "png", "bmp", "webp"]
+)
 
 if uploaded_file is not None:
-    file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-    img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+    try:
+        file_bytes = uploaded_file.read()
+        result = process_receipt(file_bytes)
 
-    result = scan_document_from_array(img)
+        st.success(f"Processing completed. Unrotation angle: {result['angle']:.2f}°")
 
-    message = result.get("message")
-    if message:
-        if result.get("mode") == "detected":
-            st.success(message)
-        else:
-            st.warning(message)
+        col1, col2 = st.columns(2)
 
-    original_img = result.get("original", img)
-    warped_img = result.get("warped", img)
-    enhanced_img = result.get("enhanced")
-    scanned_img = result.get("scanned")
-    debug_edges = result.get("debug_edges")
-    debug_contour = result.get("debug_contour")
+        with col1:
+            st.subheader("Original")
+            st.image(cv2.cvtColor(result["original"], cv2.COLOR_BGR2RGB), use_container_width=True)
 
-    st.subheader("Processing overview")
+            st.subheader("Edges")
+            st.image(result["edges"], use_container_width=True, clamp=True)
 
-    # الصف الأول
-    col1, col2 = st.columns(2)
+            st.subheader("Filtered Edges")
+            st.image(result["filtered_edges"], use_container_width=True, clamp=True)
 
-    with col1:
-        st.image(
-            cv2.cvtColor(original_img, cv2.COLOR_BGR2RGB),
-            caption="Original Image",
-            use_container_width=True
-        )
+        with col2:
+            st.subheader("Convex Hull")
+            st.image(cv2.cvtColor(result["hull"], cv2.COLOR_BGR2RGB), use_container_width=True)
 
-    with col2:
-        if debug_edges is not None:
-            st.image(
-                debug_edges,
-                caption="Detected Edges",
-                use_container_width=True
-            )
-        else:
-            st.info("No edge-debug image available in the current scanner.py version.")
+            st.subheader("Rotated Rectangle")
+            st.image(cv2.cvtColor(result["rotated_rect"], cv2.COLOR_BGR2RGB), use_container_width=True)
 
-    # الصف الثاني
-    col3, col4 = st.columns(2)
+            st.subheader("Mask")
+            st.image(result["mask"], use_container_width=True, clamp=True)
 
-    with col3:
-        if debug_contour is not None:
-            st.image(
-                cv2.cvtColor(debug_contour, cv2.COLOR_BGR2RGB),
-                caption="Chosen Contour / Fallback Box",
-                use_container_width=True
-            )
-        else:
-            st.info("No contour-debug image available in the current scanner.py version.")
+        st.subheader("Final Straightened Result")
+        st.image(cv2.cvtColor(result["result"], cv2.COLOR_BGR2RGB), use_container_width=True)
 
-    with col4:
-        if warped_img is not None:
-            if len(warped_img.shape) == 3:
-                st.image(
-                    cv2.cvtColor(warped_img, cv2.COLOR_BGR2RGB),
-                    caption="Straightened / Cropped Document",
-                    use_container_width=True
-                )
-            else:
-                st.image(
-                    warped_img,
-                    caption="Straightened / Cropped Document",
-                    use_container_width=True
-                )
-
-    st.subheader("Final result")
-    col5, col6 = st.columns(2)
-
-    with col5:
-        if enhanced_img is not None:
-            st.image(
-                enhanced_img,
-                caption="Enhanced Grayscale",
-                use_container_width=True
-            )
-        else:
-            st.info("No enhanced image available.")
-
-    with col6:
-        if scanned_img is not None:
-            st.image(
-                scanned_img,
-                caption="Scanned Output",
-                use_container_width=True
-            )
-        else:
-            st.error("No scanned output was returned by scanner.py")
-
-    # OCR
-    if scanned_img is not None:
-        st.subheader("Extracted text (OCR)")
-        try:
-            custom_config = r"--oem 3 --psm 6"
-            extracted_text = pytesseract.image_to_string(
-                scanned_img,
-                lang=ocr_language,
-                config=custom_config
-            )
-
-            st.text_area("Recognized text", extracted_text, height=300)
-
-            st.download_button(
-                label="Download extracted text",
-                data=extracted_text,
-                file_name="recognized.txt",
-                mime="text/plain"
-            )
-
-        except Exception as e:
-            st.error(f"OCR failed: {e}")
-
-        success, buffer = cv2.imencode(".png", scanned_img)
-        if success:
-            st.download_button(
-                label="Download scanned image",
-                data=buffer.tobytes(),
-                file_name="scanned_document.png",
-                mime="image/png"
-            )
+    except Exception as e:
+        st.error(f"Error: {e}")
