@@ -475,10 +475,6 @@ if uploaded_file is not None:
                 st.session_state.last_click = current_click
                 st.rerun()
 
-        st.write(f"Points selected: {len(st.session_state.manual_points_original)}/4")
-        for i, p in enumerate(st.session_state.manual_points_original, start=1):
-            st.write(f"{i}: x={p[0]}, y={p[1]}")
-
         if len(st.session_state.manual_points_original) == 4:
             try:
                 result = detect_document_manual(original, st.session_state.manual_points_original)
