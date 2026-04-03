@@ -275,7 +275,7 @@ def detect_document_auto(original):
                 best_fill_ratio = min(fill_ratio, 1.0)
 
     if best_quad is None:
-        raise ValueError("لم أتمكن من اكتشاف الورقة بشكل صحيح.")
+        raise ValueError("Could not detect the document correctly.")
 
     best_quad = best_quad * resize_ratio
 
@@ -348,8 +348,15 @@ def decode_uploaded_image(file_bytes):
     file_array = np.asarray(bytearray(file_bytes), dtype=np.uint8)
     img = cv2.imdecode(file_array, cv2.IMREAD_COLOR)
     if img is None:
-        raise ValueError("تعذر قراءة الصورة المرفوعة.")
+        raise ValueError("Could not read the uploaded image.")
     return img
+
+
+def image_to_download_bytes(image_bgr, filename="final_result.png"):
+    success, buffer = cv2.imencode(".png", image_bgr)
+    if not success:
+        return None
+    return buffer.tobytes()
 
 
 # -----------------------------
@@ -358,7 +365,9 @@ def decode_uploaded_image(file_bytes):
 st.set_page_config(page_title="A4 Document Scanner", layout="wide")
 
 st.title("A4 Document Scanner")
-st.write("ارفع صورة ورقة A4. يمكنك استخدام الوضع التلقائي أو تحديد الزوايا يدويًا بالنقر 4 مرات.")
+st.write(
+    "Upload an image of an A4 document. Use the default automatic mode, or manually adjust the corners for a more accurate crop."
+)
 
 mode = st.radio("Mode", ["Auto", "Manual"], horizontal=True)
 
@@ -399,12 +408,20 @@ if uploaded_file is not None:
                 caption="Final Result",
                 use_container_width=True
             )
+
+            download_bytes = image_to_download_bytes(result)
+            if download_bytes is not None:
+                st.download_button(
+                    label="Download Final Result",
+                    data=download_bytes,
+                    file_name="final_result.png",
+                    mime="image/png"
+                )
+
         except Exception as e:
             st.error(f"Error: {e}")
 
     else:
-        st.info("انقر بالترتيب: أعلى يسار، أعلى يمين، أسفل يمين، أسفل يسار.")
-
         preview_rgb, preview_scale = make_preview_for_clicks(
             original,
             max_width=1000,
@@ -415,9 +432,6 @@ if uploaded_file is not None:
             preview_rgb,
             st.session_state.manual_points_preview
         )
-
-        st.subheader("Preview")
-        st.image(preview_rgb, caption="الصورة كاملة للمعاينة", use_container_width=True)
 
         col_btn1, col_btn2 = st.columns(2)
         with col_btn1:
@@ -437,7 +451,6 @@ if uploaded_file is not None:
                 st.rerun()
 
         st.subheader("Click on the 4 corners")
-        st.write("اضغط على الزوايا الأربع فوق الصورة التالية:")
 
         clicked = streamlit_image_coordinates(
             preview_with_points,
@@ -474,5 +487,15 @@ if uploaded_file is not None:
                     caption="Manual Result",
                     use_container_width=True
                 )
+
+                download_bytes = image_to_download_bytes(result)
+                if download_bytes is not None:
+                    st.download_button(
+                        label="Download Final Result",
+                        data=download_bytes,
+                        file_name="final_result.png",
+                        mime="image/png"
+                    )
+
             except Exception as e:
                 st.error(f"Error: {e}")
