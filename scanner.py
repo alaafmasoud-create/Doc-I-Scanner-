@@ -43,24 +43,38 @@ def four_point_transform(image, pts):
 
 
 def find_document_contour(image):
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    original_h, original_w = image.shape[:2]
+
+    scale = 1000.0 / max(original_h, original_w)
+    resized = cv2.resize(image, (int(original_w * scale), int(original_h * scale)))
+
+    gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
     blur = cv2.GaussianBlur(gray, (5, 5), 0)
 
-    edged = cv2.Canny(blur, 75, 200)
-
+    edged = cv2.Canny(blur, 50, 150)
     kernel = np.ones((5, 5), np.uint8)
     edged = cv2.dilate(edged, kernel, iterations=2)
     edged = cv2.erode(edged, kernel, iterations=1)
 
-    contours, _ = cv2.findContours(edged, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(edged, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     contours = sorted(contours, key=cv2.contourArea, reverse=True)
 
-    for contour in contours[:10]:
+    image_area = resized.shape[0] * resized.shape[1]
+
+    for contour in contours:
+        area = cv2.contourArea(contour)
+
+        # تجاهل الأشياء الصغيرة
+        if area < image_area * 0.2:
+            continue
+
         peri = cv2.arcLength(contour, True)
         approx = cv2.approxPolyDP(contour, 0.02 * peri, True)
 
         if len(approx) == 4:
-            return approx.reshape(4, 2)
+            pts = approx.reshape(4, 2).astype("float32")
+            pts = pts / scale
+            return pts
 
     return None
 
@@ -87,11 +101,10 @@ def enhance_scanned_document(warped):
 
 def scan_document_from_array(image):
     original = image.copy()
-
     contour = find_document_contour(original)
 
     if contour is None:
-        return None, None, "Could not detect document edges clearly."
+        return None, None, "Could not detect the full document."
 
     warped = four_point_transform(original, contour)
     enhanced, scanned = enhance_scanned_document(warped)
