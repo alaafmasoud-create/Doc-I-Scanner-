@@ -1,7 +1,6 @@
 import streamlit as st
 import cv2
 import numpy as np
-import tempfile
 
 st.title("📄 Smart Document Scanner")
 
@@ -13,17 +12,31 @@ if uploaded_file is not None:
 
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-    # تحسين الصورة حتى لو ما في edges واضحة
+    # تقليل الضجيج
+    denoised = cv2.bilateralFilter(gray, 9, 75, 75)
+
+    # تحسين التباين
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    enhanced = clahe.apply(denoised)
+
+    # نسخة سكانر أخف
     scanned = cv2.adaptiveThreshold(
-        gray, 255,
+        enhanced,
+        255,
         cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY, 11, 2
+        cv2.THRESH_BINARY,
+        21,
+        10
     )
 
-    col1, col2 = st.columns(2)
+    st.subheader("Results")
+    col1, col2, col3 = st.columns(3)
 
     with col1:
         st.image(img, caption="Original Image", use_container_width=True)
 
     with col2:
-        st.image(scanned, caption="Enhanced Scan", use_container_width=True
+        st.image(enhanced, caption="Enhanced Grayscale", use_container_width=True)
+
+    with col3:
+        st.image(scanned, caption="Scanned Version", use_container_width=True)
