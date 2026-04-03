@@ -1,80 +1,99 @@
 import cv2
 import numpy as np
-import os
 
-def reorder_points(points):
-    points = points.reshape((4, 2))
-    new_points = np.zeros((4, 1, 2), dtype=np.int32)
 
-    add = points.sum(1)
-    new_points[0] = points[np.argmin(add)]
-    new_points[3] = points[np.argmax(add)]
+def order_points(pts):
+    pts = np.array(pts, dtype="float32")
+    rect = np.zeros((4, 2), dtype="float32")
 
-    diff = np.diff(points, axis=1)
-    new_points[1] = points[np.argmin(diff)]
-    new_points[2] = points[np.argmax(diff)]
+    s = pts.sum(axis=1)
+    rect[0] = pts[np.argmin(s)]   # top-left
+    rect[2] = pts[np.argmax(s)]   # bottom-right
 
-    return new_points
+    diff = np.diff(pts, axis=1)
+    rect[1] = pts[np.argmin(diff)]  # top-right
+    rect[3] = pts[np.argmax(diff)]  # bottom-left
 
-def biggest_contour(contours):
-    biggest = np.array([])
-    max_area = 0
+    return rect
 
-    for contour in contours:
-        area = cv2.contourArea(contour)
-        if area > 5000:
-            peri = cv2.arcLength(contour, True)
-            approx = cv2.approxPolyDP(contour, 0.02 * peri, True)
-            if area > max_area and len(approx) == 4:
-                biggest = approx
-                max_area = area
 
-    return biggest
+def four_point_transform(image, pts):
+    rect = order_points(pts)
+    (tl, tr, br, bl) = rect
 
-def scan_document(image_path, output_path="scanned_output.jpg", width=600, height=800):
-    img = cv2.imread(image_path)
-    if img is None:
-        raise FileNotFoundError(f"Could not load image: {image_path}")
+    width_a = np.linalg.norm(br - bl)
+    width_b = np.linalg.norm(tr - tl)
+    max_width = max(int(width_a), int(width_b))
 
-    img = cv2.resize(img, (width, height))
-    img_copy = img.copy()
+    height_a = np.linalg.norm(tr - br)
+    height_b = np.linalg.norm(tl - bl)
+    max_height = max(int(height_a), int(height_b))
 
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    blur = cv2.GaussianBlur(gray, (5, 5), 1)
-    edges = cv2.Canny(blur, 150, 200)
+    dst = np.array([
+        [0, 0],
+        [max_width - 1, 0],
+        [max_width - 1, max_height - 1],
+        [0, max_height - 1]
+    ], dtype="float32")
 
-    kernel = np.ones((5, 5))
-    dilated = cv2.dilate(edges, kernel, iterations=2)
-    threshold = cv2.erode(dilated, kernel, iterations=1)
+    matrix = cv2.getPerspectiveTransform(rect, dst)
+    warped = cv2.warpPerspective(image, matrix, (max_width, max_height))
 
-    contours, _ = cv2.findContours(threshold, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    biggest = biggest_contour(contours)
+    return warped
 
-    if biggest.size != 0:
-        biggest = reorder_points(biggest)
 
-        pts1 = np.float32(biggest)
-        pts2 = np.float32([[0, 0], [width, 0], [0, height], [width, height]])
-        matrix = cv2.getPerspectiveTransform(pts1, pts2)
-        warped = cv2.warpPerspective(img_copy, matrix, (width, height))
+def find_document_contour(image):
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    blur = cv2.GaussianBlur(gray, (5, 5), 0)
 
-        warped_gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
-        scanned = cv2.adaptiveThreshold(
-            warped_gray, 255,
-            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv2.THRESH_BINARY, 11, 2
-        )
+    edged = cv2.Canny(blur, 75, 200)
 
-        cv2.imwrite(output_path, scanned)
-        print(f"Scanned image saved as: {output_path}")
-    else:
-        print("No document-like contour detected.")
+    kernel = np.ones((5, 5), np.uint8)
+    edged = cv2.dilate(edged, kernel, iterations=2)
+    edged = cv2.erode(edged, kernel, iterations=1)
 
-if __name__ == "__main__":
-    input_image = "images/sample1.jpg"
-    output_image = "images/output_sample1.jpg"
+    contours, _ = cv2.findContours(edged, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    contours = sorted(contours, key=cv2.contourArea, reverse=True)
 
-    if not os.path.exists("images"):
-        os.makedirs("images")
+    for contour in contours[:10]:
+        peri = cv2.arcLength(contour, True)
+        approx = cv2.approxPolyDP(contour, 0.02 * peri, True)
 
-    scan_document(input_image, output_image)
+        if len(approx) == 4:
+            return approx.reshape(4, 2)
+
+    return None
+
+
+def enhance_scanned_document(warped):
+    gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
+
+    denoised = cv2.bilateralFilter(gray, 9, 75, 75)
+
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    enhanced = clahe.apply(denoised)
+
+    scanned = cv2.adaptiveThreshold(
+        enhanced,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY,
+        21,
+        10
+    )
+
+    return enhanced, scanned
+
+
+def scan_document_from_array(image):
+    original = image.copy()
+
+    contour = find_document_contour(original)
+
+    if contour is None:
+        return None, None, "Could not detect document edges clearly."
+
+    warped = four_point_transform(original, contour)
+    enhanced, scanned = enhance_scanned_document(warped)
+
+    return warped, scanned, None
