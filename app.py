@@ -433,6 +433,46 @@ st.markdown("""
         border-radius: 16px;
         padding: .4rem .55rem;
     }
+    .stRadio [role="radiogroup"] {
+        gap: 0.75rem;
+        padding-top: 0.2rem;
+    }
+    .stRadio [role="radiogroup"] label {
+        background: linear-gradient(135deg, #ede9fe 0%, #dbeafe 100%);
+        border: 1px solid #c4b5fd;
+        border-radius: 14px;
+        padding: 0.45rem 0.95rem;
+        box-shadow: 0 4px 12px rgba(79,70,229,0.10);
+    }
+    .stRadio [role="radiogroup"] label p {
+        color: #312e81;
+        font-weight: 700;
+    }
+    .stFileUploader {
+        border: 2px dashed #38bdf8;
+        background: linear-gradient(135deg, rgba(224,242,254,0.9) 0%, rgba(240,249,255,0.96) 100%);
+        box-shadow: 0 8px 22px rgba(14,165,233,0.10);
+    }
+    .stFileUploader label {
+        color: #0f172a !important;
+        font-weight: 700;
+    }
+    .stFileUploader section[data-testid="stFileUploaderDropzone"] {
+        background: transparent;
+        border: none;
+    }
+    .stFileUploader section[data-testid="stFileUploaderDropzone"] button {
+        background: linear-gradient(135deg, #0ea5e9 0%, #2563eb 100%) !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 12px !important;
+        font-weight: 800 !important;
+        box-shadow: 0 10px 22px rgba(37,99,235,0.22);
+    }
+    .stFileUploader section[data-testid="stFileUploaderDropzone"] button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 14px 28px rgba(37,99,235,0.28);
+    }
     div[data-testid="stImage"] img {
         border-radius: 16px;
         box-shadow: 0 8px 24px rgba(15,23,42,0.08);
@@ -456,7 +496,7 @@ st.markdown("""
     <p class="hero-subtitle">
         Sube una imagen de un documento A4. Usa el modo automático predeterminado o ajusta manualmente las esquinas para un recorte más preciso.
     </p>
-
+    <p class="hero-subtitle" style="margin-top: .55rem; font-weight: 700; color: #1e293b;">By Alan Masoud</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -613,10 +653,8 @@ if uploaded_files:
                         data=download_bytes,
                         file_name=f"{file_base}_final_result.png",
                         mime="image/png"
-                        
                     )
 
             except Exception as e:
                 st.error(f"Error: {e}")
         st.markdown('</div>', unsafe_allow_html=True)
-         
