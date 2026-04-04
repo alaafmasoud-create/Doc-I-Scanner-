@@ -359,66 +359,6 @@ def image_to_download_bytes(image_bgr, filename="final_result.png"):
     return buffer.tobytes()
 
 
-def gray_world_white_balance(image_bgr):
-    image = image_bgr.astype(np.float32)
-    channel_means = image.reshape(-1, 3).mean(axis=0)
-    gray_mean = float(channel_means.mean())
-
-    scales = np.array([
-        gray_mean / max(channel_means[0], 1.0),
-        gray_mean / max(channel_means[1], 1.0),
-        gray_mean / max(channel_means[2], 1.0),
-    ], dtype=np.float32)
-
-    balanced = image * scales.reshape(1, 1, 3)
-    return np.clip(balanced, 0, 255).astype(np.uint8)
-
-
-def enhance_final_result(image_bgr):
-    """
-    Deep enhancement for lighting, shadows, and contrast while preserving document detail.
-    """
-    if image_bgr is None or image_bgr.size == 0:
-        return image_bgr
-
-    # Gentle white balance to reduce color cast.
-    balanced = gray_world_white_balance(image_bgr)
-
-    # Preserve edges while smoothing noisy color variation.
-    filtered = cv2.bilateralFilter(balanced, d=5, sigmaColor=25, sigmaSpace=25)
-
-    # Work on luminance for stronger illumination correction.
-    lab = cv2.cvtColor(filtered, cv2.COLOR_BGR2LAB)
-    l_channel, a_channel, b_channel = cv2.split(lab)
-
-    h, w = l_channel.shape
-    sigma = max(15, int(max(h, w) / 24))
-    background = cv2.GaussianBlur(l_channel, (0, 0), sigmaX=sigma, sigmaY=sigma)
-
-    # Remove uneven lighting and shadows.
-    corrected_l = cv2.divide(l_channel, background, scale=255)
-
-    # Boost local contrast deeply but safely.
-    clahe = cv2.createCLAHE(clipLimit=3.8, tileGridSize=(8, 8))
-    corrected_l = clahe.apply(corrected_l)
-
-    # Lift darker regions a bit more for better readability.
-    l_float = corrected_l.astype(np.float32) / 255.0
-    gamma_corrected = np.power(np.clip(l_float, 0.0, 1.0), 0.90)
-    shadow_lift = 0.14 * np.power(1.0 - gamma_corrected, 1.6)
-    final_l = np.clip((gamma_corrected + shadow_lift) * 255.0, 0, 255).astype(np.uint8)
-
-    merged = cv2.merge([final_l, a_channel, b_channel])
-    enhanced = cv2.cvtColor(merged, cv2.COLOR_LAB2BGR)
-
-    # Final global contrast and detail enhancement.
-    enhanced = cv2.convertScaleAbs(enhanced, alpha=1.08, beta=4)
-    blur = cv2.GaussianBlur(enhanced, (0, 0), 1.1)
-    enhanced = cv2.addWeighted(enhanced, 1.18, blur, -0.18, 0)
-
-    return enhanced
-
-
 # -----------------------------
 # Streamlit UI
 # -----------------------------
@@ -654,7 +594,6 @@ if uploaded_files:
 
             try:
                 result = detect_document_auto(original)
-                result = enhance_final_result(result)
                 st.image(
                     cv2.cvtColor(result, cv2.COLOR_BGR2RGB),
                     caption="Resultado final",
@@ -756,7 +695,6 @@ if uploaded_files:
         if len(st.session_state.manual_points_original) == 4:
             try:
                 result = detect_document_manual(original, st.session_state.manual_points_original)
-                result = enhance_final_result(result)
                 st.image(
                     cv2.cvtColor(result, cv2.COLOR_BGR2RGB),
                     caption="Resultado manual",
