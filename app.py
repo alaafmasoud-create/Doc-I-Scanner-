@@ -288,6 +288,7 @@ def detect_document_auto(original):
 
     warped = four_point_transform(original, best_quad)
     warped = trim_black_frame(warped)
+    warped = enhance_document_readability(warped)
     return warped
 
 
@@ -326,6 +327,7 @@ def detect_document_manual(original, points_original):
     pts = np.array(points_original, dtype=np.float32)
     warped = four_point_transform(original, pts)
     warped = trim_black_frame(warped)
+    warped = enhance_document_readability(warped)
     return warped
 
 
@@ -342,6 +344,71 @@ def trim_black_frame(image):
 
     x, y, w, h = cv2.boundingRect(coords)
     return image[y:y + h, x:x + w]
+
+
+@st.cache_data(show_spinner=False)
+def enhance_document_readability(image):
+    if image is None or image.size == 0:
+        return image
+
+    if len(image.shape) == 2:
+        gray = image.copy()
+    else:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    h, w = gray.shape[:2]
+
+    # Mild denoising before contrast enhancement
+    gray = cv2.fastNlMeansDenoising(gray, None, 5, 7, 21)
+
+    # Strong illumination correction to reduce shadows and uneven lighting
+    sigma = max(25.0, float(max(h, w)) / 28.0)
+    background = cv2.GaussianBlur(gray, (0, 0), sigmaX=sigma, sigmaY=sigma)
+    background = np.where(background < 8, 8, background).astype(np.uint8)
+    corrected = cv2.divide(gray, background, scale=255)
+    corrected = cv2.normalize(corrected, None, 0, 255, cv2.NORM_MINMAX)
+
+    # Local contrast enhancement
+    clahe = cv2.createCLAHE(clipLimit=4.5, tileGridSize=(8, 8))
+    local = clahe.apply(corrected)
+
+    # Robust auto contrast stretch
+    p_low, p_high = np.percentile(local, (1.0, 99.4))
+    if p_high - p_low > 8:
+        stretched = np.clip((local.astype(np.float32) - p_low) * 255.0 / (p_high - p_low), 0, 255).astype(np.uint8)
+    else:
+        stretched = local
+
+    # Sharpen text and edges
+    blur_small = cv2.GaussianBlur(stretched, (0, 0), 1.1)
+    sharp = cv2.addWeighted(stretched, 1.75, blur_small, -0.75, 0)
+
+    # Build a text mask and darken text slightly for stronger readability
+    text_mask = cv2.adaptiveThreshold(
+        sharp,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY_INV,
+        31,
+        15
+    )
+    text_mask = cv2.medianBlur(text_mask, 3)
+    text_boost = cv2.convertScaleAbs(text_mask, alpha=0.28)
+    emphasized = cv2.subtract(sharp, text_boost)
+
+    # Lightly clean the background while keeping natural text edges
+    clean_bg = cv2.adaptiveThreshold(
+        emphasized,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY,
+        35,
+        11
+    )
+    final_gray = cv2.addWeighted(emphasized, 0.84, clean_bg, 0.16, 0)
+    final_gray = cv2.GaussianBlur(final_gray, (0, 0), 0.3)
+
+    return cv2.cvtColor(final_gray, cv2.COLOR_GRAY2BGR)
 
 
 def decode_uploaded_image(file_bytes):
