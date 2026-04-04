@@ -428,22 +428,55 @@ st.markdown("""
         margin-bottom: .65rem;
     }
     .stButton > button, .stDownloadButton > button {
-        border-radius: 12px !important;
-        border: 1px solid #cbd5e1 !important;
-        min-height: 2.9rem;
-        font-weight: 600;
-        box-shadow: 0 4px 12px rgba(15,23,42,0.06);
+        border-radius: 14px !important;
+        border: none !important;
+        min-height: 3rem;
+        font-weight: 800 !important;
+        font-size: 1rem !important;
+        letter-spacing: 0.01em;
+        color: #ffffff !important;
+        box-shadow: 0 10px 24px rgba(15,23,42,0.14);
         transition: all .2s ease;
-        background: white;
     }
     .stButton > button:hover, .stDownloadButton > button:hover {
-        border-color: #94a3b8 !important;
         transform: translateY(-1px);
+        box-shadow: 0 14px 28px rgba(15,23,42,0.18);
+        filter: brightness(1.04);
+    }
+    div[data-testid="column"]:first-child .stButton > button {
+        background: linear-gradient(135deg, #0f766e 0%, #0d9488 100%) !important;
+    }
+    div[data-testid="column"]:nth-of-type(2) .stButton > button {
+        background: linear-gradient(135deg, #9a3412 0%, #ea580c 100%) !important;
+    }
+    .stDownloadButton > button {
+        background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%) !important;
     }
     .stFileUploader, div[data-baseweb="select"], .stRadio {
-        background: rgba(255,255,255,0.75);
+        background: rgba(255,255,255,0.85);
         border-radius: 16px;
         padding: .4rem .55rem;
+    }
+    div[data-baseweb="select"] {
+        border: 2px solid #7c3aed;
+        box-shadow: 0 8px 22px rgba(124,58,237,0.14);
+        background: linear-gradient(135deg, rgba(245,243,255,0.98) 0%, rgba(238,242,255,0.98) 100%);
+    }
+    div[data-baseweb="select"] > div {
+        color: #312e81 !important;
+        font-weight: 700 !important;
+    }
+    label[data-testid="stWidgetLabel"] p {
+        color: #0f172a !important;
+        font-weight: 800 !important;
+        font-size: 1.02rem !important;
+    }
+    div[role="listbox"] ul {
+        background: #ffffff !important;
+    }
+    div[role="option"] {
+        color: #1e1b4b !important;
+        font-weight: 700 !important;
     }
     .stRadio [role="radiogroup"] {
         gap: 0.75rem;
@@ -631,7 +664,7 @@ if uploaded_files:
                 st.session_state.last_click = None
                 st.rerun()
 
-        st.subheader("Haz clic en las 4 esquinas")
+        st.markdown('<div class="section-title" style="margin-top:.35rem; color:#1d4ed8;">Haz clic en las 4 esquinas</div>', unsafe_allow_html=True)
 
         clicked = streamlit_image_coordinates(
             preview_with_points,
