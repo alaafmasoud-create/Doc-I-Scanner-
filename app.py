@@ -448,6 +448,15 @@ st.markdown("""
         color: #312e81;
         font-weight: 700;
     }
+    .footer-signature {
+        text-align: center;
+        margin-top: 2.2rem;
+        padding-top: 0.8rem;
+        color: #64748b;
+        font-size: 0.72rem;
+        font-weight: 500;
+        opacity: 0.9;
+        }
     .stFileUploader {
         border: 2px dashed #38bdf8;
         background: linear-gradient(135deg, rgba(224,242,254,0.9) 0%, rgba(240,249,255,0.96) 100%);
@@ -655,7 +664,6 @@ if uploaded_files:
                     )
 
             except Exception as e:
-                st.error(f"Error: {e}")
-                
+                st.error(f"Error: {e}")  
 st.markdown('<div class="footer-signature">By Alan Masoud</div>', unsafe_allow_html=True)
 
