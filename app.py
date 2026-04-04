@@ -362,12 +362,106 @@ def image_to_download_bytes(image_bgr, filename="final_result.png"):
 # -----------------------------
 # Streamlit UI
 # -----------------------------
-st.set_page_config(page_title="A4 Document Scanner", layout="wide")
+st.set_page_config(page_title="A4 Document Scanner", page_icon="📄", layout="wide")
 
-st.title("A4 Document Scanner")
-st.write(
-    "Upload an image of an A4 document. Use the default automatic mode, or manually adjust the corners for a more accurate crop."
-)
+st.markdown("""
+<style>
+    .stApp {
+        background: linear-gradient(180deg, #f8fafc 0%, #eef4ff 100%);
+    }
+    .block-container {
+        padding-top: 1.6rem;
+        padding-bottom: 2rem;
+        max-width: 1200px;
+    }
+    .hero-box {
+        background: rgba(255,255,255,0.88);
+        border: 1px solid rgba(148,163,184,0.18);
+        border-radius: 22px;
+        padding: 1.3rem 1.4rem;
+        box-shadow: 0 10px 30px rgba(15,23,42,0.08);
+        margin-bottom: 1rem;
+        backdrop-filter: blur(6px);
+    }
+    .hero-title {
+        font-size: 2rem;
+        font-weight: 800;
+        color: #0f172a;
+        margin-bottom: .35rem;
+        letter-spacing: -0.02em;
+    }
+    .hero-subtitle {
+        font-size: 1rem;
+        color: #475569;
+        line-height: 1.65;
+        margin-bottom: 0;
+    }
+    .section-card {
+        background: rgba(255,255,255,0.9);
+        border: 1px solid rgba(148,163,184,0.16);
+        border-radius: 20px;
+        padding: 1rem 1rem 0.8rem 1rem;
+        box-shadow: 0 10px 24px rgba(15,23,42,0.05);
+        margin-bottom: 1rem;
+    }
+    .section-title {
+        font-size: 1.05rem;
+        font-weight: 700;
+        color: #0f172a;
+        margin-bottom: .2rem;
+    }
+    .section-note {
+        font-size: .95rem;
+        color: #64748b;
+        margin-bottom: .65rem;
+    }
+    .stButton > button, .stDownloadButton > button {
+        border-radius: 12px !important;
+        border: 1px solid #cbd5e1 !important;
+        min-height: 2.9rem;
+        font-weight: 600;
+        box-shadow: 0 4px 12px rgba(15,23,42,0.06);
+        transition: all .2s ease;
+        background: white;
+    }
+    .stButton > button:hover, .stDownloadButton > button:hover {
+        border-color: #94a3b8 !important;
+        transform: translateY(-1px);
+    }
+    .stFileUploader, div[data-baseweb="select"], .stRadio {
+        background: rgba(255,255,255,0.75);
+        border-radius: 16px;
+        padding: .4rem .55rem;
+    }
+    div[data-testid="stImage"] img {
+        border-radius: 16px;
+        box-shadow: 0 8px 24px rgba(15,23,42,0.08);
+    }
+    .result-label {
+        display: inline-block;
+        padding: .32rem .65rem;
+        border-radius: 999px;
+        background: #e0ecff;
+        color: #1d4ed8;
+        font-size: .83rem;
+        font-weight: 700;
+        margin-bottom: .5rem;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+st.markdown("""
+<div class="hero-box">
+    <div class="hero-title">📄 A4 Document Scanner</div>
+    <p class="hero-subtitle">
+        Upload an image of an A4 document. Use the default automatic mode, or manually adjust the corners for a more accurate crop.
+    </p>
+</div>
+""", unsafe_allow_html=True)
+
+st.markdown('<div class="section-card">', unsafe_allow_html=True)
+st.markdown('<div class="section-title">Scanner Settings</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-note">Choose the mode and upload one or more images.</div>', unsafe_allow_html=True)
 
 mode = st.radio("Mode", ["Auto", "Manual"], horizontal=True)
 
@@ -376,6 +470,8 @@ uploaded_files = st.file_uploader(
     type=["jpg", "jpeg", "png", "bmp", "webp"],
     accept_multiple_files=True
 )
+
+st.markdown('</div>', unsafe_allow_html=True)
 
 if "manual_points_preview" not in st.session_state:
     st.session_state.manual_points_preview = []
@@ -392,7 +488,9 @@ if "last_uploaded_key" not in st.session_state:
 if uploaded_files:
     if mode == "Auto":
         for file_index, uploaded_file in enumerate(uploaded_files):
-            st.subheader(f"Result - {uploaded_file.name}")
+            st.markdown('<div class="section-card">', unsafe_allow_html=True)
+            st.markdown('<div class="result-label">AUTO RESULT</div>', unsafe_allow_html=True)
+            st.subheader(f"{uploaded_file.name}")
 
             file_bytes = uploaded_file.getvalue()
             original = decode_uploaded_image(file_bytes)
@@ -418,8 +516,12 @@ if uploaded_files:
 
             except Exception as e:
                 st.error(f"Error: {e}")
+            st.markdown('</div>', unsafe_allow_html=True)
 
     else:
+        st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        st.markdown('<div class="result-label">MANUAL MODE</div>', unsafe_allow_html=True)
+
         selected_file_name = st.selectbox(
             "Select image for manual mode",
             [file.name for file in uploaded_files]
@@ -514,3 +616,4 @@ if uploaded_files:
 
             except Exception as e:
                 st.error(f"Error: {e}")
+        st.markdown('</div>', unsafe_allow_html=True)
