@@ -613,7 +613,7 @@ if uploaded_files:
                         data=download_bytes,
                         file_name=f"{file_base}_final_result.png",
                         mime="image/png"
-                        <p class="hero-subtitle" style="margin-top: .55rem; font-weight: 700; color: #1e293b;">By Alan Masoud</p>
+                        
                     )
 
             except Exception as e:
