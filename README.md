@@ -1,4 +1,4 @@
-# Smart Receipt Rectifier
+#  A4 Document Scanner
 
 A Streamlit app that uploads a receipt or document image from the browser, detects its shape, estimates orientation, and rectifies it using OpenCV.
 
