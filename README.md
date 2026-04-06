@@ -15,4 +15,10 @@ A Streamlit app that uploads a receipt or document image from the browser, detec
 
 ```bash
 pip install -r requirements.txt
+```
 
+---
+
+## Author Credit
+
+Built by Alan Masoud
