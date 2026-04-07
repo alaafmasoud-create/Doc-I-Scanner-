@@ -4,24 +4,29 @@ import numpy as np
 from streamlit_image_coordinates import streamlit_image_coordinates
 
 
-# -----------------------------
-# Geometry helpers
-# -----------------------------
+# ------------------------------------------------------------
+# دوال مساعدة للهندسة والإحداثيات
+# ------------------------------------------------------------
+# هذه الدالة تستقبل 4 نقاط غير مرتبة وتميد ترتيبها دائمًا
+# بالشكل التالي: أعلى يسار، أعلى يمين، أسفل يمين، أسفل يسار.
+# هذا الترتيب مهم جدًا قبل تنفيذ أي تحويل منظور.
 def order_points(pts):
     pts = np.array(pts, dtype=np.float32)
     rect = np.zeros((4, 2), dtype=np.float32)
 
     s = pts.sum(axis=1)
-    rect[0] = pts[np.argmin(s)]   # top-left
-    rect[2] = pts[np.argmax(s)]   # bottom-right
+    rect[0] = pts[np.argmin(s)]   # الزاوية العلوية اليسرى: عادةً تكون أصغر مجموع لإحداثيي x و y
+    rect[2] = pts[np.argmax(s)]   # الزاوية السفلية اليمنى: عادةً تكون أكبر مجموع لإحداثيي x و y
 
     diff = np.diff(pts, axis=1).reshape(-1)
-    rect[1] = pts[np.argmin(diff)]  # top-right
-    rect[3] = pts[np.argmax(diff)]  # bottom-left
+    rect[1] = pts[np.argmin(diff)]  # الزاوية العلوية اليمنى: غالبًا تظهر كأصغر فرق بين الإحداثيين
+    rect[3] = pts[np.argmax(diff)]  # الزاوية السفلية اليسرى: غالبًا تظهر كأكبر فرق بين الإحداثيين
 
     return rect
 
 
+# هذه الدالة تقص الوثيقة من الصورة اعتمادًا على 4 نقاط،
+# ثم تصحح الميلان والمنظور لتخرج النتيجة وكأنها ممسوحة بسكانر.
 def four_point_transform(image, pts):
     rect = order_points(pts)
     tl, tr, br, bl = rect
@@ -46,6 +51,8 @@ def four_point_transform(image, pts):
     return warped
 
 
+# هذه الدالة توسّع الشكل الرباعي قليلًا انطلاقًا من مركزه.
+# فائدتها أنها تضيف هامشًا بسيطًا حول حدود الوثيقة عند الحاجة.
 def expand_quad(pts, scale, img_shape):
     pts = np.array(pts, dtype=np.float32)
     center = pts.mean(axis=0)
@@ -58,6 +65,8 @@ def expand_quad(pts, scale, img_shape):
     return expanded.astype(np.float32)
 
 
+# هذه الدالة تحاول تحويل أي contour مكتشف إلى 4 زوايا فقط.
+# تبدأ أولًا بتبسيط الشكل، وإذا لم تنجح تستخدم أصغر مستطيل يحيط به.
 def contour_to_quad(contour):
     hull = cv2.convexHull(contour)
     peri = cv2.arcLength(hull, True)
@@ -72,9 +81,11 @@ def contour_to_quad(contour):
     return box.astype(np.float32)
 
 
-# -----------------------------
-# Mask helpers
-# -----------------------------
+# ------------------------------------------------------------
+# دوال مساعدة لمعالجة الأقنعة الثنائية (Mask)
+# ------------------------------------------------------------
+# هذه الدالة تنظف القناع الثنائي من المناطق البيضاء الملتصقة
+# بحواف الصورة، لأن هذه المناطق غالبًا ضجيج وليست الوثيقة المطلوبة.
 def clear_border_connected(mask):
     cleaned = mask.copy()
     h, w = cleaned.shape
@@ -95,6 +106,9 @@ def clear_border_connected(mask):
     return cleaned
 
 
+# هذه الدالة تبحث عن أكبر مكوّن أبيض متصل داخل القناع،
+# بشرط ألا يكون صغيرًا جدًا وألا يكون ملاصقًا لحواف الصورة.
+# الهدف هو التقاط جسم الوثيقة واستبعاد الضجيج.
 def largest_non_border_component(binary_mask, min_area_ratio=0.05):
     h, w = binary_mask.shape
     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary_mask, 8)
@@ -124,6 +138,11 @@ def largest_non_border_component(binary_mask, min_area_ratio=0.05):
     return comp
 
 
+# هذه الدالة تبني عدة أقنعة مرشحة للوثيقة بطرق مختلفة:
+# 1) GrabCut
+# 2) الاعتماد على سطوع الورقة
+# 3) الاعتماد على الحواف
+# ثم تُستخدم هذه الأقنعة لاحقًا لاختيار أفضل حدود للوثيقة.
 def build_candidate_masks(image):
     masks = []
 
@@ -134,7 +153,7 @@ def build_candidate_masks(image):
 
     h, w = gray.shape
 
-    # GrabCut
+    # إنشاء قناع مرشح باستخدام خوارزمية GrabCut لعزل الوثيقة عن الخلفية
     try:
         gc_mask = np.zeros((h, w), np.uint8)
         rect = (int(w * 0.06), int(h * 0.04), int(w * 0.88), int(h * 0.92))
@@ -155,7 +174,7 @@ def build_candidate_masks(image):
     except Exception:
         pass
 
-    # Bright paper mask
+    # إنشاء قناع يعتمد على سطوع الورقة لاستخراج المناطق الفاتحة المشابهة للورق
     _, bright = cv2.threshold(gray_eq, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     bright = clear_border_connected(bright)
 
@@ -168,7 +187,7 @@ def build_candidate_masks(image):
         comp = cv2.morphologyEx(comp, cv2.MORPH_CLOSE, k, iterations=2)
         masks.append(("bright", comp))
 
-    # Edges
+    # إنشاء قناع يعتمد على الحواف لاكتشاف حدود الوثيقة
     edges = cv2.Canny(gray, 40, 140)
     k2 = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
     edges = cv2.dilate(edges, k2, iterations=2)
@@ -178,9 +197,16 @@ def build_candidate_masks(image):
     return masks
 
 
-# -----------------------------
-# Candidate scoring
-# -----------------------------
+# ------------------------------------------------------------
+# تقييم المرشحين واختيار أفضل شكل رباعي
+# ------------------------------------------------------------
+# هذه الدالة تعطي كل شكل رباعي درجة تقييم.
+# التقييم يعتمد على عوامل مثل:
+# - حجم الشكل بالنسبة للصورة
+# - قرب أبعاده من نسبة ورقة A4
+# - قربه من مركز الصورة
+# - مدى امتلاء الكونتور داخل الصندوق
+# ثم يُختار المرشح صاحب أعلى درجة.
 def score_candidate(quad, img_shape, contour_area):
     h, w = img_shape[:2]
     rect = order_points(quad)
@@ -230,13 +256,17 @@ def score_candidate(quad, img_shape, contour_area):
     return score
 
 
-# -----------------------------
-# Auto detection
-# -----------------------------
+# ------------------------------------------------------------
+# الاكتشاف التلقائي للوثيقة
+# ------------------------------------------------------------
+# هذه الدالة هي قلب الوضع التلقائي.
+# تقوم بتصغير الصورة عند الحاجة، وتوليد مرشحين، وتقييمهم،
+# ثم اختيار أفضل شكل رباعي واستخراج الوثيقة منه تلقائيًا.
 def detect_document_auto(original):
     if original.shape[0] > 1400:
         resize_ratio = original.shape[0] / 1400.0
         image = cv2.resize(original, (int(original.shape[1] / resize_ratio), 1400))
+    # في الوضع اليدوي يختار المستخدم صورة واحدة، ثم ينقر على الزوايا الأربع بنفسه.
     else:
         resize_ratio = 1.0
         image = original.copy()
@@ -291,9 +321,12 @@ def detect_document_auto(original):
     return warped
 
 
-# -----------------------------
-# Manual mode helpers
-# -----------------------------
+# ------------------------------------------------------------
+# دوال مساعدة للوضع اليدوي
+# ------------------------------------------------------------
+# هذه الدالة تنشئ نسخة معاينة مناسبة للعرض داخل الواجهة،
+# مع الحفاظ على نسبة التصغير حتى يمكن تحويل النقرات من المعاينة
+# إلى الإحداثيات الأصلية على الصورة الحقيقية.
 def make_preview_for_clicks(image, max_width=1000, max_height=1400):
     h, w = image.shape[:2]
     scale = min(max_width / w, max_height / h, 1.0)
@@ -304,6 +337,8 @@ def make_preview_for_clicks(image, max_width=1000, max_height=1400):
     return rgb, scale
 
 
+# هذه الدالة ترسم النقاط التي اختارها المستخدم فوق صورة المعاينة،
+# وتضع رقمًا بجانب كل نقطة ليسهل معرفة ترتيب الزوايا المختارة.
 def draw_points_on_preview(preview_rgb, points_preview, radius=8):
     canvas = preview_rgb.copy()
 
@@ -312,7 +347,7 @@ def draw_points_on_preview(preview_rgb, points_preview, radius=8):
         cv2.putText(
             canvas,
             str(idx + 1),
-            (int(x) + 10, int(y) - 10),
+            (int(x) + 10, int(y) - 10)
             cv2.FONT_HERSHEY_SIMPLEX,
             0.8,
             (255, 0, 0),
@@ -322,6 +357,8 @@ def draw_points_on_preview(preview_rgb, points_preview, radius=8):
     return canvas
 
 
+# هذه الدالة تطبق القص اليدوي اعتمادًا على 4 نقاط اختارها المستخدم بنفسه،
+# ثم تصحح المنظور وتزيل الإطار الأسود إن وُجد.
 def detect_document_manual(original, points_original):
     pts = np.array(points_original, dtype=np.float32)
     warped = four_point_transform(original, pts)
@@ -329,9 +366,11 @@ def detect_document_manual(original, points_original):
     return warped
 
 
-# -----------------------------
-# Post-processing
-# -----------------------------
+# ------------------------------------------------------------
+# المعالجة اللاحقة بعد القص
+# ------------------------------------------------------------
+# هذه الدالة تزيل أي حواف سوداء زائدة قد تظهر بعد تحويل المنظور،
+# وذلك عبر اكتشاف المنطقة غير السوداء وقص الصورة عليها فقط.
 def trim_black_frame(image):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     _, mask = cv2.threshold(gray, 6, 255, cv2.THRESH_BINARY)
@@ -344,6 +383,8 @@ def trim_black_frame(image):
     return image[y:y + h, x:x + w]
 
 
+# هذه الدالة تحول الملف المرفوع من بايتات خام إلى صورة OpenCV قابلة للمعالجة.
+# وإذا تعذر فكها، تُرجع خطأ واضحًا.
 def decode_uploaded_image(file_bytes):
     file_array = np.asarray(bytearray(file_bytes), dtype=np.uint8)
     img = cv2.imdecode(file_array, cv2.IMREAD_COLOR)
@@ -352,6 +393,8 @@ def decode_uploaded_image(file_bytes):
     return img
 
 
+# هذه الدالة تحوّل الصورة النهائية إلى بايتات بصيغة PNG،
+# حتى يمكن توفيرها للمستخدم عبر زر التنزيل في الواجهة.
 def image_to_download_bytes(image_bgr, filename="final_result.png"):
     success, buffer = cv2.imencode(".png", image_bgr)
     if not success:
@@ -359,11 +402,13 @@ def image_to_download_bytes(image_bgr, filename="final_result.png"):
     return buffer.tobytes()
 
 
-# -----------------------------
-# Streamlit UI
-# -----------------------------
+# ------------------------------------------------------------
+# واجهة المستخدم باستخدام Streamlit
+# ------------------------------------------------------------
+# إعدادات الصفحة الأساسية: عنوان الصفحة، الأيقونة، ونمط العرض العريض.
 st.set_page_config(page_title="Escáner de Documentos A4", page_icon="📄", layout="wide")
 
+# تنسيقات CSS مخصصة لتحسين شكل الواجهة بصريًا.
 st.markdown("""
 <style>
     .stApp {
@@ -547,6 +592,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# الواجهة العلوية التعريفية التي تعرض عنوان التطبيق ووصفه للمستخدم.
 st.markdown("""
 <div class="hero-box">
     <div class="hero-title">📄 Escáner de Documentos A4</div>
@@ -556,6 +602,7 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
+# بطاقة إعدادات الواجهة التي تحتوي على اختيار الوضع ورفع الصور.
 st.markdown('<div class="section-card">', unsafe_allow_html=True)
 st.markdown('<div class="section-title">Configuración del escáner</div>', unsafe_allow_html=True)
 st.markdown('<div class="section-note">Elige el modo y sube una o varias imágenes.</div>', unsafe_allow_html=True)
@@ -570,6 +617,8 @@ uploaded_files = st.file_uploader(
 
 st.markdown('</div>', unsafe_allow_html=True)
 
+# متغيرات session_state تحفظ النقاط المختارة في الوضع اليدوي
+# حتى لا تضيع عند كل إعادة تشغيل لواجهة Streamlit.
 if "manual_points_preview" not in st.session_state:
     st.session_state.manual_points_preview = []
 
@@ -582,7 +631,10 @@ if "last_click" not in st.session_state:
 if "last_uploaded_key" not in st.session_state:
     st.session_state.last_uploaded_key = None
 
+# عند وجود ملفات مرفوعة نبدأ معالجة الصور بحسب الوضع المختار:
+# إما تلقائي أو يدوي.
 if uploaded_files:
+    # في الوضع التلقائي تتم معالجة كل صورة على حدة واكتشاف الوثيقة تلقائيًا.
     if mode == "Automático":
         for file_index, uploaded_file in enumerate(uploaded_files):
             st.markdown('<div class="section-card">', unsafe_allow_html=True)
@@ -630,6 +682,8 @@ if uploaded_files:
 
         upload_key = f"{uploaded_file.name}_{uploaded_file.size}"
 
+        # إذا غيّر المستخدم الصورة المختارة، نعيد تعيين النقاط القديمة
+        # حتى لا تنتقل نقرات صورة إلى صورة أخرى.
         if st.session_state.last_uploaded_key != upload_key:
             st.session_state.manual_points_preview = []
             st.session_state.manual_points_original = []
@@ -674,6 +728,8 @@ if uploaded_files:
             key="manual_click_image"
         )
 
+        # عند كل نقرة جديدة على صورة المعاينة نحفظ النقطة،
+        # ثم نحوّلها من أبعاد المعاينة إلى أبعاد الصورة الأصلية.
         if clicked is not None:
             current_click = (clicked["x"], clicked["y"])
 
@@ -692,6 +748,7 @@ if uploaded_files:
                 st.session_state.last_click = current_click
                 st.rerun()
 
+        # عندما يصل عدد النقاط إلى أربع زوايا، نطبق القص اليدوي مباشرة.
         if len(st.session_state.manual_points_original) == 4:
             try:
                 result = detect_document_manual(original, st.session_state.manual_points_original)
