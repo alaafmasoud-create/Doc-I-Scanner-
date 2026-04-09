@@ -344,6 +344,26 @@ def trim_black_frame(image):
     return image[y:y + h, x:x + w]
 
 
+def ensure_vertical_result(image):
+    if image is None or image.size == 0:
+        return image
+
+    h, w = image.shape[:2]
+    if w > h:
+        return cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
+    return image.copy()
+
+
+def orient_result_for_display(image, rotation_degrees=0):
+    oriented = ensure_vertical_result(image)
+    rotation_degrees = int(rotation_degrees) % 360
+
+    if rotation_degrees == 180:
+        oriented = cv2.rotate(oriented, cv2.ROTATE_180)
+
+    return oriented
+
+
 def decode_uploaded_image(file_bytes):
     file_array = np.asarray(bytearray(file_bytes), dtype=np.uint8)
     img = cv2.imdecode(file_array, cv2.IMREAD_COLOR)
@@ -582,6 +602,9 @@ if "last_click" not in st.session_state:
 if "last_uploaded_key" not in st.session_state:
     st.session_state.last_uploaded_key = None
 
+if "result_orientation" not in st.session_state:
+    st.session_state.result_orientation = {}
+
 if uploaded_files:
     if mode == "Automático":
         for file_index, uploaded_file in enumerate(uploaded_files):
@@ -591,16 +614,39 @@ if uploaded_files:
 
             file_bytes = uploaded_file.getvalue()
             original = decode_uploaded_image(file_bytes)
+            upload_key = f"{uploaded_file.name}_{uploaded_file.size}"
+            orientation_key = f"auto_{upload_key}"
+
+            if orientation_key not in st.session_state.result_orientation:
+                st.session_state.result_orientation[orientation_key] = 0
 
             try:
                 result = detect_document_auto(original)
+                display_result = orient_result_for_display(
+                    result,
+                    st.session_state.result_orientation[orientation_key]
+                )
+
+                col_rot, col_reset = st.columns(2)
+                with col_rot:
+                    if st.button("Rotate 180°", key=f"rotate_auto_{file_index}"):
+                        st.session_state.result_orientation[orientation_key] = (
+                            st.session_state.result_orientation.get(orientation_key, 0) + 180
+                        ) % 360
+                        st.rerun()
+
+                with col_reset:
+                    if st.button("Reset orientation", key=f"reset_auto_{file_index}"):
+                        st.session_state.result_orientation[orientation_key] = 0
+                        st.rerun()
+
                 st.image(
-                    cv2.cvtColor(result, cv2.COLOR_BGR2RGB),
+                    cv2.cvtColor(display_result, cv2.COLOR_BGR2RGB),
                     caption="Resultado final",
                     use_container_width=True
                 )
 
-                download_bytes = image_to_download_bytes(result)
+                download_bytes = image_to_download_bytes(display_result)
                 if download_bytes is not None:
                     file_base = uploaded_file.name.rsplit(".", 1)[0]
                     st.download_button(
@@ -629,12 +675,14 @@ if uploaded_files:
         )
 
         upload_key = f"{uploaded_file.name}_{uploaded_file.size}"
+        orientation_key = f"manual_{upload_key}"
 
         if st.session_state.last_uploaded_key != upload_key:
             st.session_state.manual_points_preview = []
             st.session_state.manual_points_original = []
             st.session_state.last_click = None
             st.session_state.last_uploaded_key = upload_key
+            st.session_state.result_orientation[orientation_key] = 0
 
         file_bytes = uploaded_file.getvalue()
         original = decode_uploaded_image(file_bytes)
@@ -656,6 +704,7 @@ if uploaded_files:
                 st.session_state.manual_points_preview = []
                 st.session_state.manual_points_original = []
                 st.session_state.last_click = None
+                st.session_state.result_orientation[orientation_key] = 0
                 st.rerun()
 
         with col_btn2:
@@ -693,25 +742,49 @@ if uploaded_files:
                 st.rerun()
 
         if len(st.session_state.manual_points_original) == 4:
+            if orientation_key not in st.session_state.result_orientation:
+                st.session_state.result_orientation[orientation_key] = 0
+
             try:
                 result = detect_document_manual(original, st.session_state.manual_points_original)
+                display_result = orient_result_for_display(
+                    result,
+                    st.session_state.result_orientation[orientation_key]
+                )
+
+                col_rot, col_reset = st.columns(2)
+                with col_rot:
+                    if st.button("Rotate 180°", key=f"rotate_manual_{upload_key}"):
+                        st.session_state.result_orientation[orientation_key] = (
+                            st.session_state.result_orientation.get(orientation_key, 0) + 180
+                        ) % 360
+                        st.rerun()
+
+                with col_reset:
+                    if st.button("Reset orientation", key=f"reset_manual_{upload_key}"):
+                        st.session_state.result_orientation[orientation_key] = 0
+                        st.rerun()
+
                 st.image(
-                    cv2.cvtColor(result, cv2.COLOR_BGR2RGB),
+                    cv2.cvtColor(display_result, cv2.COLOR_BGR2RGB),
                     caption="Resultado manual",
                     use_container_width=True
                 )
 
-                download_bytes = image_to_download_bytes(result)
+                download_bytes = image_to_download_bytes(display_result)
                 if download_bytes is not None:
                     file_base = uploaded_file.name.rsplit(".", 1)[0]
                     st.download_button(
                         label="Descargar resultado final",
                         data=download_bytes,
                         file_name=f"{file_base}_final_result.png",
-                        mime="image/png"
+                        mime="image/png",
+                        key=f"download_manual_{upload_key}"
                     )
 
             except Exception as e:
-                st.error(f"Error: {e}")  
-st.markdown('<div class="footer-signature">By Alan Masoud</div>', unsafe_allow_html=True)
+                st.error(f"Error: {e}")
 
+        st.markdown('</div>', unsafe_allow_html=True)
+
+st.markdown('<div class="footer-signature">By Alan Masoud</div>', unsafe_allow_html=True)
